@@ -468,3 +468,12 @@ func (r *BulkResponse) Succeeded() []*BulkResponseItem {
 	}
 	return succeeded
 }
+
+func (s *BulkService) Set(requests []BulkableRequest) *BulkService {
+	s.requests = requests
+	return s
+}
+
+func (s *BulkService) GetActions() []BulkableRequest {
+	return s.requests
+}
