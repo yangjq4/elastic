@@ -198,7 +198,7 @@ func (q *BoolQuery) Source() (interface{}, error) {
 	if q.disableCoord != nil {
 		boolClause["disable_coord"] = *q.disableCoord
 	}
-	if q.minimumShouldMatch != "" {
+	if q.minimumShouldMatch != "" && len(q.shouldClauses) > 0 {
 		boolClause["minimum_should_match"] = q.minimumShouldMatch
 	}
 	if q.adjustPureNegative != nil {

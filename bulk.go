@@ -94,10 +94,17 @@ func (s *BulkService) Pretty(pretty bool) *BulkService {
 // Add adds bulkable requests, i.e. BulkIndexRequest, BulkUpdateRequest,
 // and/or BulkDeleteRequest.
 func (s *BulkService) Add(requests ...BulkableRequest) *BulkService {
-	for _, r := range requests {
-		s.requests = append(s.requests, r)
-	}
+	s.requests = append(s.requests, requests...)
 	return s
+}
+
+func (s *BulkService) Set(requests []BulkableRequest) *BulkService {
+	s.requests = requests
+	return s
+}
+
+func (s *BulkService) GetActions() []BulkableRequest {
+	return s.requests
 }
 
 // EstimatedSizeInBytes returns the estimated size of all bulkable
