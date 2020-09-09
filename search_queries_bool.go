@@ -189,7 +189,7 @@ func (q *BoolQuery) Source() (interface{}, error) {
 	if q.boost != nil {
 		boolClause["boost"] = *q.boost
 	}
-	if q.minimumShouldMatch != "" {
+	if q.minimumShouldMatch != "" && len(q.shouldClauses) > 0 {
 		boolClause["minimum_should_match"] = q.minimumShouldMatch
 	}
 	if q.adjustPureNegative != nil {
