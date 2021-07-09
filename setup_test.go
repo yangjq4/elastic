@@ -23,6 +23,7 @@ const (
 	testIndexName2     = "elastic-test2"
 	testIndexName3     = "elastic-test3"
 	testIndexName4     = "elastic-test4"
+	testIndexName5     = "elastic-test5"
 	testIndexNameEmpty = "elastic-test-empty"
 	testMapping        = `
 {
@@ -300,10 +301,19 @@ var (
 	logDeprecations = flag.String("deprecations", "off", "log or fail on deprecation warnings")
 	logTypesRemoval = flag.Bool("types-removal", false, "log deprecation warnings regarding types removal")
 	strict          = flag.Bool("strict-decoder", false, "treat missing unknown fields in response as errors")
+	noSniff         = flag.Bool("no-sniff", false, "allows to disable sniffing globally")
+	noHealthcheck   = flag.Bool("no-healthcheck", false, "allows to disable healthchecks globally")
 )
 
 func setupTestClient(t logger, options ...ClientOptionFunc) (client *Client) {
 	var err error
+
+	if *noSniff {
+		options = append(options, SetSniff(false))
+	}
+	if *noHealthcheck {
+		options = append(options, SetHealthcheck(false))
+	}
 
 	client, err = NewClient(options...)
 	if err != nil {
@@ -340,6 +350,7 @@ func setupTestClient(t logger, options ...ClientOptionFunc) (client *Client) {
 	client.DeleteIndex(testIndexName2).Do(context.TODO())
 	client.DeleteIndex(testIndexName3).Do(context.TODO())
 	client.DeleteIndex(testIndexName4).Do(context.TODO())
+	client.DeleteIndex(testIndexName5).Do(context.TODO())
 	client.DeleteIndex(testIndexNameEmpty).Do(context.TODO())
 	client.DeleteIndex(testOrderIndex).Do(context.TODO())
 	client.DeleteIndex(testNoSourceIndexName).Do(context.TODO())

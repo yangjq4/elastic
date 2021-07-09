@@ -79,6 +79,7 @@ func TestAggs(t *testing.T) {
 	globalAgg := NewGlobalAggregation()
 	usersAgg := NewTermsAggregation().Field("user").Size(10).OrderByCountDesc()
 	retweetsAgg := NewTermsAggregation().Field("retweets").Size(10)
+	multiTermsAgg := NewMultiTermsAggregation().Terms("user").MultiTerms(MultiTerm{Field: "tags", Missing: "unclassified"}).Size(10)
 	avgRetweetsAgg := NewAvgAggregation().Field("retweets")
 	avgRetweetsWithMetaAgg := NewAvgAggregation().Field("retweetsMeta").Meta(map[string]interface{}{"meta": true})
 	weightedAvgRetweetsAgg := NewWeightedAvgAggregation().
@@ -115,12 +116,19 @@ func TestAggs(t *testing.T) {
 	geoBoundsAgg := NewGeoBoundsAggregation().Field("location")
 	geoHashAgg := NewGeoHashGridAggregation().Field("location").Precision(5)
 	geoCentroidAgg := NewGeoCentroidAggregation().Field("location")
+	geoTileAgg := NewGeoTileGridAggregation().Field("location")
+	topMetricsAgg := NewTopMetricsAggregation().
+		Field("user").
+		Field("retweets").
+		Sort("retweets", false).
+		Size(2)
 
 	// Run query
 	builder := client.Search().Index(testIndexName).Query(all).Pretty(true)
 	builder = builder.Aggregation("global", globalAgg)
 	builder = builder.Aggregation("users", usersAgg)
 	builder = builder.Aggregation("retweets", retweetsAgg)
+	builder = builder.Aggregation("multiterms", multiTermsAgg)
 	builder = builder.Aggregation("avgRetweets", avgRetweetsAgg)
 	builder = builder.Aggregation("avgRetweetsWithMeta", avgRetweetsWithMetaAgg)
 	builder = builder.Aggregation("weightedAvgRetweets", weightedAvgRetweetsAgg)
@@ -152,6 +160,9 @@ func TestAggs(t *testing.T) {
 	builder = builder.Aggregation("viewport", geoBoundsAgg)
 	builder = builder.Aggregation("geohashed", geoHashAgg)
 	builder = builder.Aggregation("centroid", geoCentroidAgg)
+	builder = builder.Aggregation("geotile-grid", geoTileAgg)
+	builder = builder.Aggregation("top-metrics", topMetricsAgg)
+
 	// Unnamed filters
 	countByUserAgg := NewFiltersAggregation().
 		Filters(NewTermQuery("user", "olivere"), NewTermQuery("user", "sandrae")).
@@ -327,6 +338,38 @@ func TestAggs(t *testing.T) {
 		}
 		if agg.Buckets[2].DocCount != 1 {
 			t.Errorf("expected %d; got: %d", 1, agg.Buckets[2].DocCount)
+		}
+	}
+
+	// A multi terms aggregate
+	{
+		agg, found := agg.MultiTerms("multiterms")
+		if !found {
+			t.Errorf("expected %v; got: %v", true, found)
+		}
+		if agg == nil {
+			t.Fatalf("expected != nil; got: nil")
+		}
+		if len(agg.Buckets) != 4 {
+			t.Fatalf("expected %d; got: %d", 4, len(agg.Buckets))
+		}
+		if want, have := 2, len(agg.Buckets[0].Key); want != have {
+			t.Errorf("expected %v; got: %v", want, have)
+		}
+		if want, have := "olivere", agg.Buckets[0].Key[0]; want != have {
+			t.Errorf("expected %v; got: %v", want, have)
+		}
+		if want, have := "golang", agg.Buckets[0].Key[1]; want != have {
+			t.Errorf("expected %v; got: %v", want, have)
+		}
+		if agg.Buckets[0].KeyAsString == nil {
+			t.Fatal("expected string not nil")
+		}
+		if want, have := "olivere|golang", *agg.Buckets[0].KeyAsString; want != have {
+			t.Errorf("expected %v; got: %v", want, have)
+		}
+		if agg.Buckets[0].DocCount != 2 {
+			t.Errorf("expected %d; got: %d", 2, agg.Buckets[0].DocCount)
 		}
 	}
 
@@ -1164,6 +1207,17 @@ func TestAggs(t *testing.T) {
 		}
 	}
 
+	// geotile grid
+	{
+		agg, found := agg.GeoTile("geotile-grid")
+		if !found {
+			t.Errorf("expected %v; got: %v", true, found)
+		}
+		if agg == nil {
+			t.Fatalf("expected != nil; got: nil")
+		}
+	}
+
 	// Filters agg "countByUser" (unnamed)
 	{
 		agg, found := agg.Filters("countByUser")
@@ -1341,6 +1395,41 @@ func TestAggs(t *testing.T) {
 		}
 		if want, have := 12.0, *movingFnAgg.Value; want != have {
 			t.Fatalf("expected movingFn = %v, have %v", want, have)
+		}
+	}
+
+	// top metrics aggregation
+	{
+		agg, found := agg.TopMetrics("top-metrics")
+		if !found {
+			t.Fatalf("expected %v; got: %v", true, false)
+		}
+		if agg == nil {
+			t.Fatal("expected != nil; got: nil")
+		}
+
+		if want, have := 2, len(agg.Top); want != have {
+			t.Fatalf("expected %d top results, have %d", want, have)
+		}
+
+		if want, have := "olivere", agg.Top[0].Metrics["user"]; want != have {
+			t.Fatalf("expected %v top user, have %v", want, have)
+		}
+		if want, have := float64(108), agg.Top[0].Metrics["retweets"]; want != have {
+			t.Fatalf("expected %v top user, have %v", want, have)
+		}
+		if want, have := float64(108), agg.Top[0].Sort[0]; want != have {
+			t.Fatalf("expected %v sort value, have %v", want, have)
+		}
+
+		if want, have := "sandrae", agg.Top[1].Metrics["user"]; want != have {
+			t.Fatalf("expected %v top user, have %v", want, have)
+		}
+		if want, have := float64(12), agg.Top[1].Metrics["retweets"]; want != have {
+			t.Fatalf("expected %v top user, have %v", want, have)
+		}
+		if want, have := float64(12), agg.Top[1].Sort[0]; want != have {
+			t.Fatalf("expected %v sort value, have %v", want, have)
 		}
 	}
 }
@@ -3111,8 +3200,8 @@ func TestAggsBucketDateRange(t *testing.T) {
 	if agg.Buckets[0].To == nil {
 		t.Errorf("expected To != %v; got: %v", nil, agg.Buckets[0].To)
 	}
-	if *agg.Buckets[0].To != float64(1.3437792E+12) {
-		t.Errorf("expected To = %v; got: %v", float64(1.3437792E+12), *agg.Buckets[0].To)
+	if *agg.Buckets[0].To != float64(1.3437792e+12) {
+		t.Errorf("expected To = %v; got: %v", float64(1.3437792e+12), *agg.Buckets[0].To)
 	}
 	if agg.Buckets[0].ToAsString != "08-2012" {
 		t.Errorf("expected ToAsString = %q; got: %q", "08-2012", agg.Buckets[0].ToAsString)
@@ -3123,8 +3212,8 @@ func TestAggsBucketDateRange(t *testing.T) {
 	if agg.Buckets[1].From == nil {
 		t.Errorf("expected From != %v; got: %v", nil, agg.Buckets[1].From)
 	}
-	if *agg.Buckets[1].From != float64(1.3437792E+12) {
-		t.Errorf("expected From = %v; got: %v", float64(1.3437792E+12), *agg.Buckets[1].From)
+	if *agg.Buckets[1].From != float64(1.3437792e+12) {
+		t.Errorf("expected From = %v; got: %v", float64(1.3437792e+12), *agg.Buckets[1].From)
 	}
 	if agg.Buckets[1].FromAsString != "08-2012" {
 		t.Errorf("expected FromAsString = %q; got: %q", "08-2012", agg.Buckets[1].FromAsString)
@@ -3426,6 +3515,55 @@ func TestAggsBucketGeoHash(t *testing.T) {
 	}
 	if agg.Buckets[1].DocCount != 3198 {
 		t.Errorf("expected doc count %d; got: %d", 3198, agg.Buckets[1].DocCount)
+	}
+}
+
+func TestAggsBucketGeoTileGrid(t *testing.T) {
+	s := `{
+	"geotile-grid-aggregation":{
+		"buckets":[
+			{
+				"key": "6/38/20",
+				"doc_count": 36914
+			},
+			{
+				"key": "6/38/19",
+				"doc_count": 22182
+			}
+		]
+	}
+}`
+
+	aggs := new(Aggregations)
+	err := json.Unmarshal([]byte(s), &aggs)
+	if err != nil {
+		t.Fatalf("expected no error decoding; got: %v", err)
+	}
+
+	agg, found := aggs.GeoTile("geotile-grid-aggregation")
+	if !found {
+		t.Fatal("expected aggregation to be found")
+	}
+	if agg == nil {
+		t.Fatalf("expected aggregation != nil; got: %v", agg)
+	}
+	if agg.Buckets == nil {
+		t.Fatalf("expected aggregation buckets != nil; got: %v", agg.Buckets)
+	}
+	if len(agg.Buckets) != 2 {
+		t.Errorf("expected %d bucket entries; got: %d", 2, len(agg.Buckets))
+	}
+	if agg.Buckets[0].Key != "6/38/20" {
+		t.Errorf("expected key %q; got: %q", "6/38/20", agg.Buckets[0].Key)
+	}
+	if agg.Buckets[0].DocCount != 36914 {
+		t.Errorf("expected doc count %d; got: %d", 36914, agg.Buckets[0].DocCount)
+	}
+	if agg.Buckets[1].Key != "6/38/19" {
+		t.Errorf("expected key %q; got: %q", "6/38/19", agg.Buckets[1].Key)
+	}
+	if agg.Buckets[1].DocCount != 22182 {
+		t.Errorf("expected doc count %d; got: %d", 22182, agg.Buckets[1].DocCount)
 	}
 }
 

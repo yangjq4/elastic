@@ -955,7 +955,7 @@ func TestSearchInnerHitsOnHasChild(t *testing.T) {
 		t.Errorf("expected SearchResult.TotalHits() = %d; got %d", 2, searchResult.TotalHits())
 	}
 	if len(searchResult.Hits.Hits) != 1 {
-		t.Errorf("expected len(SearchResult.Hits.Hits) = %d; got %d", 2, len(searchResult.Hits.Hits))
+		t.Fatalf("expected len(SearchResult.Hits.Hits) = %d; got %d", 2, len(searchResult.Hits.Hits))
 	}
 
 	hit := searchResult.Hits.Hits[0]
@@ -1068,7 +1068,7 @@ func TestSearchInnerHitsOnHasParent(t *testing.T) {
 		t.Errorf("expected SearchResult.TotalHits() = %d; got %d", want, have)
 	}
 	if want, have := 2, len(searchResult.Hits.Hits); want != have {
-		t.Errorf("expected len(SearchResult.Hits.Hits) = %d; got %d", want, have)
+		t.Fatalf("expected len(SearchResult.Hits.Hits) = %d; got %d", want, have)
 	}
 
 	hit := searchResult.Hits.Hits[0]
@@ -1108,6 +1108,204 @@ func TestSearchInnerHitsOnHasParent(t *testing.T) {
 	innerHits, found = hit.InnerHits["answers"]
 	if !found {
 		t.Fatalf("expected inner hits for name %q", "tweets")
+	}
+	if innerHits == nil || innerHits.Hits == nil {
+		t.Fatal("expected inner hits != nil")
+	}
+	if want, have := 1, len(innerHits.Hits.Hits); want != have {
+		t.Fatalf("expected %d inner hits; got: %d", want, have)
+	}
+	if want, have := "1", innerHits.Hits.Hits[0].Id; want != have {
+		t.Fatalf("expected inner hit with id %q; got: %q", want, have)
+	}
+}
+
+func TestSearchInnerHitsOnNested(t *testing.T) {
+	//client := setupTestClientAndCreateIndexAndLog(t)
+	client := setupTestClientAndCreateIndex(t)
+
+	ctx := context.Background()
+
+	// Create index
+	createIndex, err := client.CreateIndex(testIndexName5).Body(`{
+		"settings":{
+			"number_of_shards":1,
+			"number_of_replicas":0
+		},
+		"mappings": {
+			"properties": {
+			  	"comments": {
+					"type": "nested"
+				}
+			}
+		}
+	}`).Do(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if createIndex == nil {
+		t.Errorf("expected result to be != nil; got: %v", createIndex)
+	}
+
+	// Add documents
+	// See https://www.elastic.co/guide/en/elasticsearch/reference/7.9/inner-hits.html#nested-inner-hits for example code.
+	type comment struct {
+		Author string `json:"author"`
+		Number int    `json:"number"`
+	}
+	type doc struct {
+		Title    string    `json:"title"`
+		Comments []comment `json:"comments"`
+	}
+	doc1 := doc{
+		Title: "Test title",
+		Comments: []comment{
+			{Author: "kimchy", Number: 1},
+			{Author: "nik9000", Number: 2},
+		},
+	}
+	_, err = client.Index().Index(testIndexName5).Id("1").BodyJson(&doc1).Refresh("true").Do(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Search for all documents that have an answer, and return those answers as inner hits
+	q := NewNestedQuery("comments", NewMatchQuery("comments.number", 2)).InnerHit(NewInnerHit())
+	searchResult, err := client.Search().
+		Index(testIndexName5).
+		Query(q).
+		Pretty(true).
+		Do(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if searchResult.Hits == nil {
+		t.Errorf("expected SearchResult.Hits != nil; got nil")
+	}
+	if searchResult.TotalHits() != 1 {
+		t.Errorf("expected SearchResult.TotalHits() = %d; got %d", 2, searchResult.TotalHits())
+	}
+	if len(searchResult.Hits.Hits) != 1 {
+		t.Fatalf("expected len(SearchResult.Hits.Hits) = %d; got %d", 2, len(searchResult.Hits.Hits))
+	}
+
+	hit := searchResult.Hits.Hits[0]
+	if want, have := "1", hit.Id; want != have {
+		t.Fatalf("expected tweet %q; got: %q", want, have)
+	}
+	if hit.InnerHits == nil {
+		t.Fatalf("expected inner hits; got: %v", hit.InnerHits)
+	}
+	if want, have := 1, len(hit.InnerHits); want != have {
+		t.Fatalf("expected %d inner hits; got: %d", want, have)
+	}
+	innerHits, found := hit.InnerHits["comments"]
+	if !found {
+		t.Fatalf("expected inner hits for name %q", "comments")
+	}
+	if innerHits == nil || innerHits.Hits == nil {
+		t.Fatal("expected inner hits != nil")
+	}
+	if want, have := 1, len(innerHits.Hits.Hits); want != have {
+		t.Fatalf("expected %d inner hits; got: %d", want, have)
+	}
+	if want, have := "1", innerHits.Hits.Hits[0].Id; want != have {
+		t.Fatalf("expected inner hit with id %q; got: %q", want, have)
+	}
+}
+
+func TestSearchInnerHitsOnNestedHierarchy(t *testing.T) {
+	// client := setupTestClientAndCreateIndexAndLog(t)
+	client := setupTestClientAndCreateIndex(t)
+
+	ctx := context.Background()
+
+	// Create index
+	createIndex, err := client.CreateIndex(testIndexName5).Body(`{
+		"settings":{
+			"number_of_shards":1,
+			"number_of_replicas":0
+		},
+		"mappings": {
+			"properties": {
+			  	"comments": {
+					"type": "nested",
+					"properties": {
+				  		"votes": {
+							"type": "nested"
+				  		}
+					}
+			  	}
+			}
+		}
+	}`).Do(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if createIndex == nil {
+		t.Errorf("expected result to be != nil; got: %v", createIndex)
+	}
+
+	// Add documents
+	// See https://www.elastic.co/guide/en/elasticsearch/reference/7.9/inner-hits.html#hierarchical-nested-inner-hits for example code.
+	type vote struct {
+		Voter string `json:"voter"`
+		Value int    `json:"value"`
+	}
+	type comment struct {
+		Author string `json:"author"`
+		Text   string `json:"text"`
+		Votes  []vote `json:"votes"`
+	}
+	type doc struct {
+		Title    string    `json:"title"`
+		Comments []comment `json:"comments"`
+	}
+	doc1 := doc{
+		Title: "Test title",
+		Comments: []comment{
+			{Author: "kimchy", Text: "words words words", Votes: []vote{}},
+			{Author: "nik9000", Text: "words words words", Votes: []vote{{Voter: "kimchy", Value: 1}, {Voter: "other", Value: -1}}},
+		},
+	}
+	_, err = client.Index().Index(testIndexName5).Id("1").BodyJson(&doc1).Refresh("true").Do(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Search for all documents that have an answer, and return those answers as inner hits
+	q := NewNestedQuery("comments.votes", NewMatchQuery("comments.votes.voter", "kimchy")).InnerHit(NewInnerHit())
+	searchResult, err := client.Search().
+		Index(testIndexName5).
+		Query(q).
+		Pretty(true).
+		Do(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if searchResult.Hits == nil {
+		t.Errorf("expected SearchResult.Hits != nil; got nil")
+	}
+	if searchResult.TotalHits() != 1 {
+		t.Errorf("expected SearchResult.TotalHits() = %d; got %d", 2, searchResult.TotalHits())
+	}
+	if len(searchResult.Hits.Hits) != 1 {
+		t.Fatalf("expected len(SearchResult.Hits.Hits) = %d; got %d", 2, len(searchResult.Hits.Hits))
+	}
+
+	hit := searchResult.Hits.Hits[0]
+	if want, have := "1", hit.Id; want != have {
+		t.Fatalf("expected tweet %q; got: %q", want, have)
+	}
+	if hit.InnerHits == nil {
+		t.Fatalf("expected inner hits; got: %v", hit.InnerHits)
+	}
+	if want, have := 1, len(hit.InnerHits); want != have {
+		t.Fatalf("expected %d inner hits; got: %d", want, have)
+	}
+	innerHits, found := hit.InnerHits["comments.votes"]
+	if !found {
+		t.Fatalf("expected inner hits for name %q", "comments.votes")
 	}
 	if innerHits == nil || innerHits.Hits == nil {
 		t.Fatal("expected inner hits != nil")
@@ -1542,5 +1740,53 @@ func TestSearchWithDateMathIndices(t *testing.T) {
 	}
 	if got, want := len(res.Hits.Hits), 2; got != want {
 		t.Errorf("expected len(SearchResult.Hits.Hits) = %d; got %d", want, got)
+	}
+}
+
+func TestSearchResultDecode(t *testing.T) {
+	tests := []struct {
+		Body string
+	}{
+		// #0 With _shards.failures
+		{
+			Body: `{
+				"took":1146,
+				"timed_out":false,
+				"_shards":{
+				   "total":8,
+				   "successful":6,
+				   "skipped":0,
+				   "failed":2,
+				   "failures":[
+					  {
+						 "shard":1,
+						 "index":"l9leakip-0000001",
+						 "node":"AsQq1Dh2QxCSTRSLTg0vFw",
+						 "reason":{
+							"type":"illegal_argument_exception",
+							"reason":"The length [1119437] of field [events.summary] in doc[2524900]/index[l9leakip-0000001] exceeds the [index.highlight.max_analyzed_offset] limit [1000000]. To avoid this error, set the query parameter [max_analyzed_offset] to a value less than index setting [1000000] and this will tolerate long field values by truncating them."
+						 }
+					  },
+					  {
+						 "shard":3,
+						 "index":"l9leakip-0000001",
+						 "node":"AsQq1Dh2QxCSTRSLTg0vFw",
+						 "reason":{
+							"type":"illegal_argument_exception",
+							"reason":"The length [1023566] of field [events.summary] in doc[2168434]/index[l9leakip-0000001] exceeds the [index.highlight.max_analyzed_offset] limit [1000000]. To avoid this error, set the query parameter [max_analyzed_offset] to a value less than index setting [1000000] and this will tolerate long field values by truncating them."
+						 }
+					  }
+				   ]
+				},
+				"hits":{}
+			 }`,
+		},
+	}
+
+	for i, tt := range tests {
+		var resp SearchResult
+		if err := json.Unmarshal([]byte(tt.Body), &resp); err != nil {
+			t.Fatalf("case #%d: expected no error, got %v", i, err)
+		}
 	}
 }
